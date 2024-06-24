@@ -4,34 +4,51 @@
 \usepackage{cleveref}
 \usepackage{multirow}
 \usepackage{svg}
-
+\usepackage{url}
 \AtBeginDocument{%
   \providecommand\BibTeX{{%
     \normalfont B\kern-0.5em{\scshape i\kern-0.25em b}\kern-0.8em\TeX}}}
 
 
+\newcommand{\sg}[1]{\textbf{SG: #1}}
+
 
 \begin{document}
 
-\title{Secure vTPMs with Intel TDX}
+\title{Analysing the Security of vTPMs with Intel TDX}
 
-\author{Sören Langenberg}
+
+\author{Sebastian Gajek} 
+\email{sebastian@enclaive.io}
+\affiliation{%
+  \institution{enclaive.io}
+  %\streetaddress{Kanzleistraße 91-93}
+  \city{Berlin}
+  %\state{Schleswig Holstein}
+  \country{Germany}
+  %\postcode{24943}
+}
+
+
+\author{Sören Langenberg} 
 \email{soeren.langenberg@stud.hs-flensburg.de}
 \affiliation{%
   \institution{University of Applied Science Flensburg}
-  \streetaddress{Kanzleistraße 91-93}
+  %\streetaddress{Kanzleistraße 91-93}
   \city{Flensburg}
-  \state{Schleswig Holstein}
+  %\state{Schleswig Holstein}
   \country{Germany}
-  \postcode{24943}
+  %\postcode{24943}
 }
+
+
 
 \begin{abstract}
 Addressing the security risks of running virtual machines in a cloud environment has led to the development of Trusted Execution Environments like Intel TDX, AMD-SEV or ARM Trustzone.
 However these technologies are only able to guarantee that the hardware and firmware was not manipulated.
 In order to establish proper trust into a virtual machine that was launched it is important to guarantee that other parts of the software stack were manipulated during configuration and boot time.
 For this an additional root of trust is needed which is typically fulfilled through a Trusted Platform Module.
-However hardware based Trusted Platform Modules can not be considered for a virtualized environment due to their limited space for measurements of different virtual machines.
+However hardware based Trusted Platform Modules cannot be considered for a virtualized environment due to their limited space for measurements of different virtual machines.
 This work shows how Intel was able to solve this problem by introducing a virtualized Trusted Platform Module which utilizes the isolation properties that are provided through Intel TDX.
 \end{abstract}
 
@@ -51,7 +68,7 @@ In order to achieve the confidentiality of data in use the processors are equipp
 The hardware bound cryptographic material is subsequently used to attest that the machine is indeed providing the promised security features and protects the data in use.
 
 The attestation typically includes the trusted components of the underlying software and hardware stack to protect against certain adversaries.
-In the case of Intel TDX, which itself is an evolution of Intel SGX which is an already prevalent technology limited to single software applications instead of VMs, two different adversaries are considered.
+In the case of Intel TDX---an evolution of Intel SGX---is an already prevalent technology limited to single software applications instead of VMs, two different adversaries are considered.
 \begin{figure}
   \centering
   \includegraphics[width=\linewidth]{pictures/TDX_Arch.png}
@@ -74,6 +91,12 @@ These components are also only part of the attestation as shown in \cite{CA-KVM}
 However it is also a good idea to extend the measurements to include the kernel and other subsequent components in the boot chain as this especially helps to protect in scenarios where the hoster of the VM is seen as untrusted but is providing a VM image to the user.
 To allow the trusted firmware to measure the content of the kernel and subsequent components Trusted Platform Modules (TPM) can be used.
 In order to efficiently scale virtualized TPMs (vTPM) can be used.
+\sg{explain concept of vTPM}
+
+\subsection{Previous Work}
+\url{https://arxiv.org/pdf/2303.16463}
+
+\subsection{Contributions}
 
 This paper will explore the implementation of this technology in Intel TDX to see if vTPMs are a valid solution in order to establish a completely trusted chain.
 
@@ -93,15 +116,15 @@ In order to ensure the complete isolation of the protected VMs (Trust Domain or 
   \label{fig:tdxarch}
 \end{figure}
 
+\subsection{TDX Module}
 The core of the new system architecture is the new TDX Module with its loader as it can be seen in \cref{fig:tdxarch}.
 The TDX Module itself is loaded as part of the bootchain through the P-SEAM Loader which is an Intel Authenticated Code Module (ACM).
 These special code modules are loaded and verified by the CPU early in the boot process to ensure that they have not been manipulated.
 Execution of these ACMs happens in on-chip memory which is called CRAM by Intel.
-In addition to the new TDX Module the hardware virtualization technique Intel VT als needed to be extended.
+In addition to the TDX the hardware virtualization technique Intel VT was extended to cope with Trusted Domains.
 In a classical scenario Intel VT operates in two modes the VMX root mode and the VMX non-root mode.
 The VMX root mode allows privileged components like the hypervisor to access specific calls of the virtualization technology in order to control its guests.
-The guest VMs typically run in the VMX non-root mode which introduces the Virtual Machine Control Structure (VMCS) which controls the CPU operations and can control how certain instruction behave.
-The VMCS allows to safe the state of VMs and therefore enables the pausing and switching between different VMs.
+The guest VMs typically run in the VMX non-root mode which introduces the Virtual Machine Control Structure (VMCS) which controls the CPU operations and can control how certain instruction behave. The VMCS allows to safe the state of VMs and therefore enables the pausing and switching between different VMs.
 The non-root mode also seperates the address space between the hypervisor and the guest which prevents memory clashes\cite{VTx}.
 For Intel TDX Intel VT got extended with a new mode called Secure Arbitration Mode (SEAM) which is responsible for the execution of TD.
 The Intel TDX Module  and its loader are on the same privilege level as the hypervisor and are therefore executed in the new SEAM VMX root mode, protected VMs are executed in the SEAM VMX non-root.
@@ -130,7 +153,7 @@ This provides the necessary isolation and protection against a malicious hypervi
 \subsubsection{Remote Attestation}
 
 Another important concept in the Intel TDX architecture is the possibility of remote attestation.
-Attestation is a process were a server can prove to a challenger via a secure channel that certain configuration parameters are met and that the server is trustworthy.
+Attestation is a process where a server can prove to a challenger via a secure channel that certain configuration parameters are met and that the server is trustworthy.
 In the context of confidential cloud computing this is an essential feature as the trusted resources are outside of the control of the user.
 To achieve remote attestation the user first needs to establish a secure connection (SSH, TLS etc.) to a TD.
 Afterwards a special CPU instruction can be invoked which creates a report for that specific TD.
@@ -168,6 +191,8 @@ Therefore one approach is to measure only the platfomr and firmware and afterwar
 % What are they?
 % How do they work
 % What is their main purpose
+\sg{push to Background}
+\sg{introduce and explain basic functions: crypto engine and storage, opt. secure channel to TPM, TPM identity/PKI; use cases: measured boot, secure boot, platform attesattion, give an example like disk encryption key provisioning}
 A Trusted Platform Module short TPM is defined as a hardware root of trust which is recognised as more secure than a pure software implementation\cite[p.1]{TPM}.
 The specifications of the TPM are developed by the Trusted Computing Group and are today widely in use by different technologies like Intel TXT\cite[p.15]{Intel-TXT} or Microsoft Bitlocker\cite{Bitlocker}.
 As part of its special position the TPM provides security capabilities like random number generators, key generation and storage as well as different cryptographic algorithms.
@@ -193,6 +218,9 @@ The hypervisor is able to create and destroy TPM instances as needed.
 In the classical virtualization model the hypervisor is a trusted component and is responsible for the separation of the different Virtual Machines.
 Therefore the virtualized TPMs (vTPM) can be seen as trusted.
 However similar to the firmware TPMs the attack surface has increased and no hardware resistant tampering is possible\cite{perez2006vtpm}\cite{vTPM-google}.
+\sg{explain how vTPMs realize the feature currently (note: insecure) and with help of TDs}
+
+
 
 \section{vTPMs in Intel TDX}
 \label{chap:vTPMTDX}
@@ -203,14 +231,14 @@ However in contrast to the already known vTPMs that are in use today these vTPMs
 Therefore a special implementation of vTPMs was developed which relies on the promised security guarantees from TDs.
 
 In order to implement a vTPM within the Intel TDX architecture either a VM based approach can be used or a TDX module based approach could be used.
-Implementing a vTPM within the TDX module is challenging as the TDX module itself is imposing a few limitation due too its major role in the software stack.
+Implementing a vTPM within the TDX module is challenging as the TDX module itself is imposing a few limitation due to its major role in the software stack.
 Introducing a vTPM functionality to the TDX Module would mean that the TCB itself is increasing due to the additional complexity introduced which is unwanted due to the major security role of the TDX Module\cite[p. 4]{Intel-vTPM}.
 Other reasons why this approach is not favored is the dependency on Non-Volatile storage for a TPM and a long latency in order to generate keys\cite[p. 4]{Intel-vTPM}.
 
 Therefore an TD-based solution has been implemented with two different designs where the vTPM is either in its own separate TD or in case of nested virtualization in the level 1 VM which hosts the VMM for the nested virtualization.
 As the vTPM shall work together with the existing TDX 1.0 architecture where nested virtualization is not supported the focus will be on the first solution where the vTPM is hosted in its own TD\cite[p. 5]{Intel-vTPM}.
 In addition the vTPM TD shall follow the TPM 2.0 specifications and shall not modify the TPM Software Stack as this ensures the compatability with existing guidelines and implementations\cite[p. 5]{Intel-vTPM}.
-However the vTPM TD can not fulfil the requirement of the persistent Non-Volatile storage due to its virtualization nature e.g. the hypervisor is able to delete the VM.
+However the vTPM TD cannot fulfil the requirement of the persistent Non-Volatile storage due to its virtualization nature e.g. the hypervisor is able to delete the VM.
 
 As the implementation relies on a separate TD which hosts the vTPM the VVM is responsible for launching the TD and afterwards creating the vTPM instance.
 After the vTPM instance has been created it initializes itself and therefore produces the Endorsement Key (EK) which is a unique asymmetric key for each TPM.
@@ -240,6 +268,7 @@ This simplified flow can be seen in \cref{fig:vtpmlaunchusertd}.
  The communication flow between the user TD and the vTPM TD for the exchange of commands and the response is not as simple as shown in \cref{fig:vtpmlaunchusertd} as the user TD and vTPM TD need to communicate through the VMM with each other which involves many calls like shown in \cref{fig:vtpmcommunication}.
 
 The vTPM TD and user TD are both extended with a command-response-buffer (CRG) in order to communicate with each other.
+\sg{how is the initial shared key established?}
 The buffer therefore resides in the shared memory regions and is accessible by the VMM and due to that the TPM command and its response which are exchanged through this buffer are enccrypted with an Authenticated Encryption with Associated Data (AEAD) algorithm in order to protect it against a malicious VMM.
 The encryption uses two separate keys the AEAD requester key and the AEAD responder key.
 Both keys are known to the user TD as well as the vTPM TD.
