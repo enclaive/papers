@@ -90,11 +90,19 @@ This means that the trusted components shown in \cref{fig:tdxcomponents} are the
 These components are also only part of the attestation as shown in \cite{CA-KVM}.
 However it is also a good idea to extend the measurements to include the kernel and other subsequent components in the boot chain as this especially helps to protect in scenarios where the hoster of the VM is seen as untrusted but is providing a VM image to the user.
 To allow the trusted firmware to measure the content of the kernel and subsequent components Trusted Platform Modules (TPM) can be used.
-In order to efficiently scale virtualized TPMs (vTPM) can be used.
-\sg{explain concept of vTPM}
+In order to efficiently scale the TPM is also virtualized.
+Therefore the specifications and the functionality of the TPM are implemented in a software module that is typically managed by the Virtual Machine Manager.
+Creating these virtualized TPMs (vTPMs) allows to provide each VM with the functionality of a TPM without having to buy a dedicated chip for each VM.
 
 \subsection{Previous Work}
-\url{https://arxiv.org/pdf/2303.16463}
+CoCoTPM short for Confidential Computing TPM is a proposed vendor neutral design for the usage of TPMs in Confidential Computing VMs.
+The concept generally involves a seperate CoCoTPM VM and a Kernel and UEFI Level CoCoTPM driver to allow communication between the CC-VM and the CoCoTPM VM \cite[3]{10.1145/3564625.3564648}.
+As the proposed concept is generally vendor neutral no specifications are made available on how the VMs should communicate the encrypted TPM commands to the Hypervisor or the other VM.
+However the basic concept of spawning an additional VM which implements the TPM functionality and provides the TPM functionality to another VM via a secure channel and encrypted TPM commands is the same as the implementation for Intel TDX.
+
+A non vendor neutral design has been proposed in \cite{10.1145/3627106.3627112} and is focused on AMD-SEV.
+This design uses the Secure VM Service Module which is a guest communication interface that allows to offload workloads to another VM which runs with more privileges (Virtual Machine Privilege Level is a new concept introduced by AMD which blocks certain instructions for guests with lower privileges).
+This allows to securely pass the execution of a certain command or feature to a VM with more privileges and eliminating the need for extending the TCB with additional protocol implementations like SPDM or TLS.
 
 \subsection{Contributions}
 
@@ -164,17 +172,17 @@ A Quoting Enclave is able to verify that the report that has been sent to it was
 Afterwards the Quoting Enclave will transfer the report into a Quote which can be verified off platform by a different entity.
 The off platform verification can be achieved because the quote is through the private key of the quoting enclave which in turn is signed through the Provisioning Certification Enclave (PCE).
 Signing the key of the QE needs to be done because in the Data Center Attestation Primitives (DCAP) model a vendor can specify its own QE.
-However in order to ensure the hardware root of trust the QE needs to be signed through a Intel controlled and signed enclave which is the PCE.
+However in order to ensure the hardware root of trust the QE needs to be signed through an Intel controlled and signed enclave which is the PCE.
 The PCE is the only enclave allowed to retrieve a key for signing other enclaves which is derived from the hardware embedded keys\cite{Intel-QVL}.
 Through this chain of signatures the challenger can contact an Intel service which has retained the hardware embedded key and ask it to verify that the signatures of the generated quote are correct.
 Verifying the signature chains gives the challenger the security that an authentic Intel TDX enabled platform was used and therefore that the collected measurements are correct.
 Now it is up to the challenger to interpret the measurements to conclude if the platform meets the expected security level or not.
 
-The remote attestation however usually covers only the inital firmware of the VM and the platform information\cite{CA-KVM}.
+The remote attestation however usually covers only the initial firmware of the VM and the platform information\cite{CA-KVM}.
 Intel TDX is also able to cover additional information through the usage of 4 Runtime Measurement Registers (RTMR)\cite{CA-KVM}.
 The RTMRs can be used to also cover the kernel as well as initrd and the whole userspace.
 Covering the userspace and all applications makes the measurement unflexible and depending on the size of the installation may also have additional performance impacts\cite{CA-KVM}.
-Therefore one approach is to measure only the platfomr and firmware and afterwards use firmware based attestation together with Trusted Platform Modules, more on that in \cref{chap:TPM} and \cref{chap:vTPMTDX}.
+Therefore one approach is to measure only the platform and firmware and afterwards use firmware based attestation together with Trusted Platform Modules, more on that in \cref{chap:TPM} and \cref{chap:vTPMTDX}.
 
 \begin{figure}
   \centering
@@ -191,18 +199,27 @@ Therefore one approach is to measure only the platfomr and firmware and afterwar
 % What are they?
 % How do they work
 % What is their main purpose
-\sg{push to Background}
-\sg{introduce and explain basic functions: crypto engine and storage, opt. secure channel to TPM, TPM identity/PKI; use cases: measured boot, secure boot, platform attesattion, give an example like disk encryption key provisioning}
 A Trusted Platform Module short TPM is defined as a hardware root of trust which is recognised as more secure than a pure software implementation\cite[p.1]{TPM}.
 The specifications of the TPM are developed by the Trusted Computing Group and are today widely in use by different technologies like Intel TXT\cite[p.15]{Intel-TXT} or Microsoft Bitlocker\cite{Bitlocker}.
 As part of its special position the TPM provides security capabilities like random number generators, key generation and storage as well as different cryptographic algorithms.
-All these functions are implemented in hardware and are resilient against tampering.
-This ensures that secrets can be generated and stored safely.
+In order to provide these functionalities the TPM is equipped with different crypto engines that can provide through a combination of hardware and software cryptographic engines that are responsible for asymmetric/symmetric operations or hash operations and other means\cite[p. 69]{TPM-Arch}.
+The TPM is also able to store its own secrets in Non-Volatile memory while storing measurements or other received information in Volatile memory\cite[p. 69]{TPM-Arch}.
+As the TPM is typically connected through a bus with the system the data in transit on this bus should be protected.
+For this the TPM supports the possibility to encrypt the communication on the bus through a shared session secret\cite[p. 11]{TPM-Mitigation}.
+As the bus protection relies on the Endorsement Key it is also possible to verify that the TPM is authentic as the manufacturer of a TPM issues a unique Endorsement Key for each TPM and signs the key before injecting it into the TPM.
+
+These functionalities can be used in order to enable measured boot/platform attestation.
+For measured boot the TPM contains a chain of hash measurements from the BIOS/EFI up to the drivers.
+In a first step the TPM measures the BIOS/EFI and compares the measurement of the BIOS/EFI with its stored value.
+If the two values are not equal the BIOS/EFI has been manipulated and the boot process will not succeed.
+In subsequent steps measurements of each layer in the boot chain are taken and being combined with the measurement of the previous layer in order to only having the need to check one measurement.
+Computing these measurements allows for example for automatic provisioning of disk encryption keys when the measurement of the TPM is known good.
+It also allows proving to a 3rd party that expected configurations are met.
 
 However not all TPMs are bound by the hardware root of trust.
 TPMs that are bound by the hardware root of trust are also often called discrete TPMs.
 These TPMs provide the highest level of security and is hardened against sophisticated attacks and are mostly used in high risk environments.
-Therefore a descrete chip is designed and built which undergoes several evaluations to check if it is resistent to hardware tampering attacks\cite{TPM-short}.
+Therefore a discrete chip is designed and built which undergoes several evaluations to check if it is resistant to hardware tampering attacks\cite{TPM-short}.
 
 So called integrated TPMs are hardware implementations of TPMs that are integrated into another chip which provides functions that are not focused on security.
 While still being a hardware implementation the TPM does not have the same level of tamper resistance\cite{TPM-short}.
@@ -210,7 +227,7 @@ While still being a hardware implementation the TPM does not have the same level
 Another class of TPMs are firmware TPMs.
 A firmware TPM is implemented in the protected software (firmware) of the CPU without a dedicated TPM chip being required.
 The firmware TPM typically resides within a TEE and is therefore separated from other programs that are being executed on the CPU.
-Implementing a firmware TPM is much more cost efficient as dedicated hardware chips are no longer a requirement however the TPM now has a bigger attack surface through the TEE code and no longer being tamper resistant\cite{TPM-short}.
+Implementing a firmware TPM is much more cost-efficient as dedicated hardware chips are no longer a requirement however the TPM now has a bigger attack surface through the TEE code and no longer being resistant against hardware tampering\cite{TPM-short}.
 
 In the context of cloud computing TPMs that are fully implemented in software have been introduced.
 These TPMs are under the control of the hypervisor which can make the TPMs available to the different Virtual Machines.
@@ -218,9 +235,9 @@ The hypervisor is able to create and destroy TPM instances as needed.
 In the classical virtualization model the hypervisor is a trusted component and is responsible for the separation of the different Virtual Machines.
 Therefore the virtualized TPMs (vTPM) can be seen as trusted.
 However similar to the firmware TPMs the attack surface has increased and no hardware resistant tampering is possible\cite{perez2006vtpm}\cite{vTPM-google}.
-\sg{explain how vTPMs realize the feature currently (note: insecure) and with help of TDs}
-
-
+In the Confidential Computing model however the hypervisor is no longer a trusted component as it can access the memory freely.
+Due to their pure software implementation vTPMs therefore can not offer the same security guarantees as stored secrets can be freely accessed in the DRAM.
+Moving the vTPMs outside the scope of the hypervisor into a trusted entity like a Trust Domain helps to protect the secrets that are stored in the DRAM through the security guarantees of the Trust Domain.
 
 \section{vTPMs in Intel TDX}
 \label{chap:vTPMTDX}
@@ -231,13 +248,13 @@ However in contrast to the already known vTPMs that are in use today these vTPMs
 Therefore a special implementation of vTPMs was developed which relies on the promised security guarantees from TDs.
 
 In order to implement a vTPM within the Intel TDX architecture either a VM based approach can be used or a TDX module based approach could be used.
-Implementing a vTPM within the TDX module is challenging as the TDX module itself is imposing a few limitation due to its major role in the software stack.
+Implementing a vTPM within the TDX module is challenging as the TDX module itself is imposing a few limitations due to its major role in the software stack.
 Introducing a vTPM functionality to the TDX Module would mean that the TCB itself is increasing due to the additional complexity introduced which is unwanted due to the major security role of the TDX Module\cite[p. 4]{Intel-vTPM}.
 Other reasons why this approach is not favored is the dependency on Non-Volatile storage for a TPM and a long latency in order to generate keys\cite[p. 4]{Intel-vTPM}.
 
 Therefore an TD-based solution has been implemented with two different designs where the vTPM is either in its own separate TD or in case of nested virtualization in the level 1 VM which hosts the VMM for the nested virtualization.
 As the vTPM shall work together with the existing TDX 1.0 architecture where nested virtualization is not supported the focus will be on the first solution where the vTPM is hosted in its own TD\cite[p. 5]{Intel-vTPM}.
-In addition the vTPM TD shall follow the TPM 2.0 specifications and shall not modify the TPM Software Stack as this ensures the compatability with existing guidelines and implementations\cite[p. 5]{Intel-vTPM}.
+In addition the vTPM TD shall follow the TPM 2.0 specifications and shall not modify the TPM Software Stack as this ensures the compatibility with existing guidelines and implementations\cite[p. 5]{Intel-vTPM}.
 However the vTPM TD cannot fulfil the requirement of the persistent Non-Volatile storage due to its virtualization nature e.g. the hypervisor is able to delete the VM.
 
 As the implementation relies on a separate TD which hosts the vTPM the VVM is responsible for launching the TD and afterwards creating the vTPM instance.
@@ -252,7 +269,7 @@ The whole process is shown in \cref{fig:vtpmlaunch}.
   \label{fig:vtpmlaunch}
 \end{figure}
 
-If a user TD with TPM support is launched the user TD establish a secure connection to the vTPM TD and attests the vTPM TD, while the vTPM TD attests the user TD.
+If a user TD with TPM support is launched the user TD establishes a secure connection to the vTPM TD and attests the vTPM TD, while the vTPM TD attests the user TD.
 As both parties can be sure that they are communicating over a secure channel with another TD the vTPM stores the TDREPORT within its PCR-Banks.
 The user TD on the other hand includes the session info in the RTMR[3] in order to have the evidence that a vTPM is connected and can be used.
 This simplified flow can be seen in \cref{fig:vtpmlaunchusertd}.
@@ -268,10 +285,11 @@ This simplified flow can be seen in \cref{fig:vtpmlaunchusertd}.
  The communication flow between the user TD and the vTPM TD for the exchange of commands and the response is not as simple as shown in \cref{fig:vtpmlaunchusertd} as the user TD and vTPM TD need to communicate through the VMM with each other which involves many calls like shown in \cref{fig:vtpmcommunication}.
 
 The vTPM TD and user TD are both extended with a command-response-buffer (CRG) in order to communicate with each other.
-\sg{how is the initial shared key established?}
 The buffer therefore resides in the shared memory regions and is accessible by the VMM and due to that the TPM command and its response which are exchanged through this buffer are enccrypted with an Authenticated Encryption with Associated Data (AEAD) algorithm in order to protect it against a malicious VMM.
 The encryption uses two separate keys the AEAD requester key and the AEAD responder key.
-Both keys are known to the user TD as well as the vTPM TD.
+Both keys are known to the user TD and the vTPM TD.
+These shared secrets are established during the initial session setup via the secure channel.
+The session key derivation is dependent on the tpmKey and bin parameter used during the start of the TPM session \cite[p. 10]{TPM-Mitigation}.
 
 The communication flow contains the following steps:
 \begin{enumerate}
@@ -319,7 +337,7 @@ However a TD can not support both attestation flows as this could cause a mismat
 If the verifier now tries to attest a vTPM flow this would not work even if the verifier retrieves the TDREPORT or TDQUOTE for the user TD the verification would not work as the vTPM based flow poisons the RTMR register 0 through 2.
 
 A vTPM can also be used for measurements made by the Linux Integrity Measurement Architecture (IMA) which enables support for runtime measurements\cite{Intel-IMA}.
-The IMA allows to detect if files which are part of the measurement have been altered either by accident or through another malicious program.
+The IMA allows a user to detect if files which are part of the measurement have been altered either by accident or through another malicious program.
 
 \subsection{Security Considerations}
 As the vTPM TD is being launched through the VMM which itself is an untrusted component it needs to be ensured that the provided vTPM Instance has not been manipulated.
@@ -335,24 +353,14 @@ The reference implementation by Intel is therefore written in Rust\cite[p. 20]{I
 Due to the nature of vTPMs the Endorsement Key of a vTPM is generated upon creation of the vTPM and destroyed after the tear down of the instance or VM.
 On hardware based TPMs the Endorsement Public Key is usually included in the Endorsement Key Certificate which is signed by the manufacturer and included in the TPM.
 Including the Endorsement Key Certificate in the TPM allows the verifier to attribute the TPM to a specific manufacturer.
-By default a vTPM can not provide this traceability and accountability.
-However it is possible to setup a Certificate Authority (CA) which will receive a TD Quote including the Endorsement Public Key.
+By default, a vTPM can not provide this traceability and accountability.
+However it is possible to set up a Certificate Authority (CA) which will receive a TD Quote including the Endorsement Public Key.
 After verifying the quote and checking that the firmware which the vTPM is a part of has not been manipulated the CA can sign the Endorsement Public Key and issue a certificate that this key is a genuine key which was produced through an approved vTPM.
-Sending the certificate back to the vTPM allows the vTPM to prove that is a genuine vTPM which has been setup and verified by the Certificate Authority.
-
-\subsection{Similiar approaches}
-CoCoTPM short for Confidential Computing TPM is a proposed vendor neutral design for the usage of TPMs in Confidential Computing VMs.
-The concept generally involves a seperate CoCoTPM VM and a Kernel and UEFI Level CoCoTPM driver to allow communication between the CC-VM and the CoCoTPM VM \cite[3]{10.1145/3564625.3564648}.
-As the proposed concept is generally vendor neutral no specifications are made available on how the VMs should communicate the encrypted TPM commands to the Hypervisor or the other VM.
-However the basic concept of spawning an additional VM which implements the TPM functionality and provides the TPM functionality to another VM via a secure channel and encrypted TPM commands is the same as the implementation for Intel TDX.
-
-A non vendor neutral design has been proposed in \cite{10.1145/3627106.3627112} and is focused on AMD-SEV.
-This design uses the Secure VM Service Module which is a guest communication interface that allows to offload workloads to another VM which runs with more privileges (Virtual Machine Privilege Level is a new concept introduced by AMD which blocks certain instructions for guests with lower privileges).
-This allows to securely pass the execution of a certain command or feature to a VM with more privileges and eliminating the need for extending the TCB with additional protocl implementations like SPDM or TLS.
+Sending the certificate back to the vTPM allows the vTPM to prove that is a genuine vTPM which has been set up and verified by the Certificate Authority.
 
 \section{Conclusion}
 Implementing secure vTPMs in Intel TDX through the usage of a separate VM is a feasible approach and allows to extend the measurement from the firmware level to the complete software stack.
-While the current architecture of Intel TDX has the need for increasing the TCB through the usage of standard protocols like SPDM or TLS instead of being able to use CPU embedded features to securely exchange information between VMs this is only a limited risk when well audited codebases are used that do not posess more capabilities than required.
+While the current architecture of Intel TDX has the need for increasing the TCB through the usage of standard protocols like SPDM or TLS instead of being able to use CPU embedded features to securely exchange information between VMs this is only a limited risk when well audited codebases are used that do not possess more capabilities than required.
 In addition the support for vTPMs allows to use the standardized attestation interface of vTPMs instead of the vendor specific communication interfaces.
 However in order to completely verify the attestation provided by the vTPM vendor specific checks are still required.
 
