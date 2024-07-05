@@ -67,8 +67,7 @@ Together with the encryption of data in transit through means like TLS and encry
 In order to achieve the confidentiality of data in use the processors are equipped with high quality cryptographic material from the manufacturer.
 The hardware bound cryptographic material is subsequently used to attest that the machine is indeed providing the promised security features and protects the data in use.
 
-The attestation typically includes the trusted components of the underlying software and hardware stack to protect against certain adversaries.
-In the case of Intel TDX---an evolution of Intel SGX---is an already prevalent technology limited to single software applications instead of VMs, two different adversaries are considered.
+The attestation typically includes the trusted components of the underlying software and hardware stack to protect against adversaries.
 \begin{figure}
   \centering
   \includegraphics[width=\linewidth]{pictures/TDX_Arch.png}
@@ -77,17 +76,8 @@ In the case of Intel TDX---an evolution of Intel SGX---is an already prevalent t
   \label{fig:tdxcomponents}
 \end{figure}
 
-The first adversary is called a System Software Adversary which could be a compromised VMM, SMM, BIOS or other VMs.
-This adversary basically covers every software based attack vector that that is not enabled through the TD itself or the firmware of the processor\cite[p. 8]{Intel-TDX-Whitepaper}.
-A System Software Adversary is therefore able to read and write the complete system memory as well as access to the CPU state and the registers of the CPU.
-Therefore, the attacker has the ability to rewrite the page table to cause page table faults or remap/replay the memory pages of the TD.
-
-The second adversary that is being considered is allowed to launch hardware attacks against Intel TDX.
-This could be the Cloud Provider trying to extract information through attacks on the memory bus or other interfaces.
-As this attacker has complete physical access to the hardware he is allowed to launch attacks like DRAM freeze or inject content into the DRAM through physical means\cite[p. 8]{Intel-TDX-Whitepaper}.
-
 This means that the trusted components shown in \cref{fig:tdxcomponents} are the Platform (but only the CPU), and the Intel TDX Module as well as each Trust Domain in itself.
-These components are also only part of the attestation as shown in \cite{CA-KVM}.
+Only these components are part of the attestation as shown in \cite{CA-KVM}.
 However, it is also a good idea to extend the measurements to include the kernel and other subsequent components in the boot chain as this especially helps to protect in scenarios where the hoster of the VM is seen as untrusted but is providing a VM image to the user.
 To allow the trusted firmware to measure the content of the kernel and subsequent components Trusted Platform Modules (TPM) can be used.
 In order to efficiently scale the TPM is also virtualized.
@@ -115,6 +105,23 @@ This paper will explore the implementation of this technology in Intel TDX to se
 Intel TDX short for Intel Trust Domain Extensions is an extension to the CPU architecture the Intel Xeon Scalable Processors since their 4th generation\cite{Intel-TDX-support}.
 This technology implements as mentioned in the beginning a trusted execution environment where Virtual Machines are hardware isolated from the Virtual Machine Monitor (VMM), hypervisor and other software.
 In order to ensure the complete isolation of the protected VMs (Trust Domain or TD) the CPU architecture has been extended through a software based component called the TDX Module as well as through extensions to x86 instruction set and other architectural changes.
+
+\subsection{Security Model}
+In the case of Intel TDX---an evolution of Intel SGX--- an already prevalent technology limited to single software applications instead of VMs, two different adversaries are considered.
+
+The first adversary is called a System Software Adversary which could be a compromised VMM, SMM, BIOS or other VMs.
+This adversary basically covers every software based attack vector that that is not enabled through the TD itself or the firmware of the processor\cite[p. 8]{Intel-TDX-Whitepaper}.
+A System Software Adversary is therefore able to read and write the complete system memory as well as access to the CPU state and the registers of the CPU.
+Therefore, the attacker has the ability to rewrite the page table to cause page table faults or remap/replay the memory pages of the TD.
+
+The second adversary that is being considered is allowed to launch hardware attacks against Intel TDX.
+This could be the Cloud Provider trying to extract information through attacks on the memory bus or other interfaces.
+As this attacker has complete physical access to the hardware he is allowed to launch attacks like DRAM freeze or inject content into the DRAM through physical means\cite[p. 8]{Intel-TDX-Whitepaper}.
+
+As already mentioned in the introduction considering an attacker which is allowed to use all these different hardware and software based attacks drastically reduces the amount of trusted components.
+In the Intel TDX architecture generally the CPU and its firmware/microcode are trusted components as executing programs without placing trust in these components is not possible.
+Additionally, the TDX Module is a trusted component due to its crucial role in relaying request from the TD to the hardware.
+TDs are generally considered a trusted component in the software stack from the perspective of a user, however other TDs are seen as untrusted as the user has no knowledge about the software that is running on these TDs. 
 
 \begin{figure}
   \centering
@@ -241,6 +248,16 @@ In the Confidential Computing model however the hypervisor is no longer a truste
 Due to their pure software implementation vTPMs therefore can not offer the same security guarantees as stored secrets can be freely accessed in the DRAM.
 Moving the vTPMs outside the scope of the hypervisor into a trusted entity like a Trust Domain helps to protect the secrets that are stored in the DRAM through the security guarantees of the Trust Domain.
 
+\subsection{Use Case: vTPM-based Attestation}
+With the introduction of the vTPM a TD can choose if it wants to use the standard RTMR based remote attestation flow or if it wants to use the remote attestation flow of the vTPM.
+Choosing the vTPM based attestation allows the verifier to verify additional properties of the user TD through the additional PCR banks of the vTPM which can contain measurements of the installed applications or anything else, while the RTMR based remote attestation flow is limited to the measurement of the hardware and firmware.
+As the TDREPORT of the user TD is also stored in the PCR[0] bank which is transmitted to the verifier in the vTPM based attestation a verification of the user TD is still possible with this new attestation flow.
+However, a TD can not support both attestation flows as this could cause a mismatch in the attestation phase because a verifier may only be aware of the RTMR based attestation.
+If the verifier now tries to attest a vTPM flow this would not work even if the verifier retrieves the TDREPORT or TDQUOTE for the user TD the verification would not work as the vTPM based flow poisons the RTMR register 0 through 2.
+
+A vTPM can also be used for measurements made by the Linux Integrity Measurement Architecture (IMA) which enables support for runtime measurements\cite{Intel-IMA}.
+The IMA allows a user to detect if files which are part of the measurement have been altered either by accident or through another malicious program.
+
 \section{vTPMs in Intel TDX}
 \label{chap:vTPMTDX}
 
@@ -293,7 +310,7 @@ Both keys are known to the user TD and the vTPM TD.
 These shared secrets are established during the initial session setup via the secure channel.
 The process of establishing these keys is explained in \cref{chap:TPM}.
 
-The communication flow contains the following steps:
+The communication flow for exchanging TPM commands and responses between the vTPM and the TD contains the following steps:
 \begin{enumerate}
     \item The user TD selects the necessary TPM command and supplies the necessary information and afterwards encrypts the message with the AEAD requester key which is subsequently copied into the CRB for the TPM.
     \item The user TD can use the Guest-Host-Communication-Interface (GHCI) TDG.VP.VMCALL<\textbf{Service.vTPM}> call to notify the VMM that an action for the specified service is pending.
@@ -322,24 +339,20 @@ The user TD itself will only trust the vTPM TD after the virtual firmware of the
 To communicate with the vTPM TD a secure session via SPDM or TLS is established and after successful verification of the Quote or TDREPORT extended to the user TD and stored in RTMR[3].
 If the connection however should fail a random value is written to RTMR[3] in order to indicate that the connection failed.
 Due to the limitations of the user TD it can generally not verify if the vTPM TD is acting malicious however once the verifier request a complete verification process which includes the measurements of the vTPM this can be detected through the Endorsement Key of the vTPM.
+In order to trust the Endorsement Key of the vTPM, which due to the nature of the vTPM is ephemeral, a Certificate Authority is needed.
+The CA itself should be an external service that communicates with the vTPM TD and requests a TD Quote of the vTPM TD which contains a hash of Endorsement Key and as a separate message also the Public Key of the Endorsement Key.
+As the vTPM TD itself is implemented through an Unikernel approach the TDX hardware is able to measure the complete binary that was used to create the vTPM TD.
+Having a measurement of the complete vTPM TD which was launched allows the CA to verify this measurement against their own measurement of the binary that was used to create the vTPM TD.
+Matching measurements indicate to the CA that the vTPM TD is trustworthy and that the Endorsement Key can be signed and be sent back to the vTPM TD.
+% Extend with external verification and signing etc.
 
 In contrast to the user TD a vTPM TD only trusts the TDX Module.
 Therefore, the vTPM records all TDREPORTs that have been received over the secure session in order to prevent the TDVF from forging any measurements.
-As the TDREPORT is generated through the TDX Module it can be trusted after a successful verification.
+As the TDREPORT is generated through a syscall which the TDX Module passes to the hardware, therefore the TDREPORT can be trusted after a successful verification.
 In order to protect fully against forged measurements from the TDVF the vTPM TD needs to ensure that the TDVF itself is not malicious.
 A detection is possible because the TDX Module itself measures the TDVF and includes it in the Measurement of Trust Domain (MRTD) which subsequently can be checked by the verifier.
 An additional protection against forged measurements from the guest OS is that the vTPM verifies that the secure session is initiated by the TDVF.
 This is achieved through checking the RTMR[3] in the TDREPORT to be zero and rejecting the session if the RTMR[3] is non-zero.
-
-\subsubsection{Usage in Attestation}
-With the Introduction of the vTPM a TD can choose if it wants to use the standard RTMR based remote attestation flow or if it wants to use the remote attestation flow of the vTPM.
-Choosing the vTPM based attestation allows the verifier to verify additional properties of the user TD through the additional PCR banks of the vTPM which can contain measurements of the installed applications or anything else, while the RTMR based remote attestation flow is limited to the measurement of the hardware and firmware.
-As the TDREPORT of the user TD is also stored in the PCR[0] bank which is transmitted to the verifier in the vTPM based attestation a verification of the user TD is still possible with this new attestation flow.
-However, a TD can not support both attestation flows as this could cause a mismatch in the attestation phase because a verifier may only be aware of the RTMR based attestation.
-If the verifier now tries to attest a vTPM flow this would not work even if the verifier retrieves the TDREPORT or TDQUOTE for the user TD the verification would not work as the vTPM based flow poisons the RTMR register 0 through 2.
-
-A vTPM can also be used for measurements made by the Linux Integrity Measurement Architecture (IMA) which enables support for runtime measurements\cite{Intel-IMA}.
-The IMA allows a user to detect if files which are part of the measurement have been altered either by accident or through another malicious program.
 
 \subsection{Security Considerations}
 As the vTPM TD is being launched through the VMM which itself is an untrusted component it needs to be ensured that the provided vTPM Instance has not been manipulated.
