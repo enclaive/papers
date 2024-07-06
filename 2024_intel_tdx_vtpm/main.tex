@@ -107,6 +107,7 @@ This technology implements as mentioned in the beginning a trusted execution env
 In order to ensure the complete isolation of the protected VMs (Trust Domain or TD) the CPU architecture has been extended through a software based component called the TDX Module as well as through extensions to x86 instruction set and other architectural changes.
 
 \subsection{Security Model}
+\label{chap:secmodel}
 In the case of Intel TDX---an evolution of Intel SGX--- an already prevalent technology limited to single software applications instead of VMs, two different adversaries are considered.
 
 The first adversary is called a System Software Adversary which could be a compromised VMM, SMM, BIOS or other VMs.
@@ -334,8 +335,9 @@ The communication flow for exchanging TPM commands and responses between the vTP
 \end{figure}
 
 \subsubsection{Trust Relationship}
-As the client of the vTPM the user TD generally places a lot of trust in the vTPM while the vTPM as the root of trust does not trust the user TD.
-The user TD itself will only trust the vTPM TD after the virtual firmware of the TD has verified that the report or quote which has been sent from the vTPM TD is valid.
+\label{chap:trustrelationship}
+As the client of the vTPM the user TD generally places a lot of trust in the vTPM while the vTPM as the root of trust does not trust the user TD\cite[p. 9]{Intel-vTPM}.
+The user TD itself will only trust the vTPM TD after the virtual firmware of the TD has verified that the report or quote which has been sent from the vTPM TD is valid\cite[p. 9]{Intel-vTPM}.
 To communicate with the vTPM TD a secure session via SPDM or TLS is established and after successful verification of the Quote or TDREPORT extended to the user TD and stored in RTMR[3].
 If the connection however should fail a random value is written to RTMR[3] in order to indicate that the connection failed.
 Due to the limitations of the user TD it can generally not verify if the vTPM TD is acting malicious however once the verifier request a complete verification process which includes the measurements of the vTPM this can be detected through the Endorsement Key of the vTPM.
@@ -355,23 +357,31 @@ An additional protection against forged measurements from the guest OS is that t
 This is achieved through checking the RTMR[3] in the TDREPORT to be zero and rejecting the session if the RTMR[3] is non-zero.
 
 \subsection{Security Considerations}
-As the vTPM TD is being launched through the VMM which itself is an untrusted component it needs to be ensured that the provided vTPM Instance has not been manipulated.
-In a guide provided by Intel the vTPM is provided to the VMM as a binary and launched through the libvirt loader parameter which usually indicates that a firmware blob is used\cite[p. 84]{Intel-linux-tdx}\cite{libvirt}.
-As it is recommended to use the TDX Virtual Firmware Design Guide for the vTPM TD binary it can be safely assumed that the vTPM TD is indeed a part of the firmware\cite[p. 20]{Intel-vTPM}.
-This is in line with the information that the vTPM TD is a lightweight bare-metal TD which is part of the TCB and therefore should be as minimal as possible\cite[p. 18]{Intel-vTPM}.
-That the vTPM binary blob is part of the firmware is a crucial point as otherwise the VMM could easily swap the binary blob out and the verifier could never verify if the binary blob has been exchanged.
+The threat model for vTPMs within Intel TDX considers only the Intel TDX enabled hardware alongside the firmware as trusted.
+Within a TD the virtual firmware and the software inside the TD are seen as trusted, when the TD is under the control of the user.
+As the vTPM TD is a special TD which is not under the control of the user this TD is generally considered untrusted until it has been successfully attested.
+However, we assume that the TDs as well as the hardware and firmware do not suffer from software based implementation flaws and are free from classic software vulnerabilities.
+In line with the TDX specifications and the threat model mentioned in \cref{chap:secmodel} software based attacks from the VMM and hardware based attacks are allowed.
 
-In order to additionally reduce the risk of errors within the vTPM TD proven cryptographic implementations should be used as well as proven implementations of the TPM functionality.
-For low level hardware programming typically C or C++ is the choice however Intel recommends to use type safe languages to eliminate memory safety issues\cite[p. 20]{Intel-vTPM}.
-The reference implementation by Intel is therefore written in Rust\cite[p. 20]{Intel-vTPM}.
+\textbf{SC1. Replacing the vTPM binary}
+Due to the nature that the VMM needs to launch the vTPM TD, which is supplied through a binary, the VMM could easily launch a different vTPM TD than expected\cite[p. 84]{Intel-linux-tdx}\cite{libvirt}.
+Under normal circumstances were the vTPM software stack is part of a VM with a complete Operating System detecting a replacement of the vTPM would be difficult to detect due to size of the TCB that would need to be measured.
+However, the design of Intel vTPM TDs relies on a lightweight bare-metal approach which only includes the absolutely necessary components\cite[p. 18]{Intel-vTPM}.
+This approach allows to measure the complete vTPM as part of the firmware during the boot process together with the TdShim layer\cite[p. 19]{Intel-vTPM}.
+Through the attestation flow a verifier is now able to verify the measurement of the complete binary that is used to launch the vTPM TD with the measurement of the binary that should have been used to launch the vTPM TD.
+If the measurements are matching the verifier can be sure that the vTPM binary was not replaced and that the vTPM TD generally can be trusted.
 
-Due to the nature of vTPMs the Endorsement Key of a vTPM is generated upon creation of the vTPM and destroyed after the tear down of the instance or VM.
-On hardware based TPMs the Endorsement Public Key is usually included in the Endorsement Key Certificate which is signed by the manufacturer and included in the TPM.
-Including the Endorsement Key Certificate in the TPM allows the verifier to attribute the TPM to a specific manufacturer.
-By default, a vTPM can not provide this traceability and accountability.
-However, it is possible to set up a Certificate Authority (CA) which will receive a TD Quote including the Endorsement Public Key.
-After verifying the quote and checking that the firmware which the vTPM is a part of has not been manipulated the CA can sign the Endorsement Public Key and issue a certificate that this key is a genuine key which was produced through an approved vTPM.
-Sending the certificate back to the vTPM allows the vTPM to prove that is a genuine vTPM which has been set up and verified by the Certificate Authority.
+\textbf{SC2. Initial secure session between TD and vTPM}
+As mentioned in \cite[p. 7]{Intel-vTPM} the virtual firmware of the TD creates a secure session with the vTPM and exchanges the TDREPORT or TDQUOTE with the peer.
+Due to limited information available regarding the specific implementation details of how this secure session is established we make a few assumptions which allow us to define the security of the communication.
+In \cref{chap:trustrelationship} and \cite[p. 9]{Intel-vTPM} it has already been explained that the user TD has no way of knowing if the vTPM TD is malicious, therefore we can assume that the user TD has no knowledge of any ephemeral vTPM keys or certificates at this point.
+To achieve a secure session between the user TD and the vTPM TD generally a session with authenticated endpoints is needed in order to prevent Man-In-The-Middle-Attacks.
+We assume that the vTPM TD is following the Service CA signed EK model shown in \cite[p. 15]{Intel-vTPM} and using SPDM with public key cryptography based on certificate for which the endorsement key is used\cite[p. 70]{SPDM}.
+Another assumption that is made is that we trust the Service CA to only sign Endorsement Keys that are authentic and have been generated through an authentic vTPM TD image as described in \cref{chap:trustrelationship}.
+Therefore, we indirectly also assume that we can trust the Service CA that signs the vTPM TDs.
+With these assumptions we can establish a secure session between the vTPM TD and the user TD which at this moment could still be hijacked and replaced without our knowledge.
+Therefore, as mentioned in \cite[p. 7]{Intel-vTPM}, we need to extend the session information to RTMR[3] which in our case would include the public key or a fingerprint of the public key used for the session setup.
+Extending the RTMR with this information allows the verifier to receive the information via a TDREPORT or TDQUOTE and match the public key or the fingerprint against a public database of signed keys from the Service CA for the vTPM.
 
 \section{Conclusion}
 Implementing secure vTPMs in Intel TDX through the usage of a separate VM is a feasible approach and allows to extend the measurement from the firmware level to the complete software stack.
